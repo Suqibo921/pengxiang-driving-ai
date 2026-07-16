@@ -172,5 +172,11 @@ def rebuild():
 if __name__ == "__main__":
     # 先初始化，再启动 Web 服务
     init_rag_system()
+
+    # 打印所有已注册的路由，用于调试
+    print(f"\n已注册的路由:")
+    for rule in app.url_map.iter_rules():
+        print(f"  {rule.rule} -> {rule.endpoint}")
+
     print(f"\n启动 Web 服务，端口: {PORT}")
     app.run(host="0.0.0.0", port=PORT, debug=False)
