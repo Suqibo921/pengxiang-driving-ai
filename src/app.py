@@ -89,10 +89,10 @@ def init_rag_system():
 # 路由
 # ============================================
 
-@app.route("/healthz")
+# 健康检查端点（在主模块中通过 add_url_rule 注册，确保 Railway 路由正常工作）
 def healthz():
     """健康检查端点。"""
-    return "OK", 200
+    return "OK", 200, {"Content-Type": "text/plain"}
 
 
 @app.route("/")
@@ -173,18 +173,9 @@ if __name__ == "__main__":
     # 先初始化，再启动 Web 服务
     init_rag_system()
 
-    # 打印所有已注册的路由，用于调试
-    print(f"\n已注册的路由 ({len(list(app.url_map.iter_rules()))} 条):")
-    for rule in app.url_map.iter_rules():
-        print(f"  {rule.rule}")
+    # 手动注册健康检查路由（确保 Railway 健康检查正常工作）
+    app.add_url_rule("/healthz", "healthz", healthz, methods=["GET"])
+    print("✅ /healthz 路由已注册")
 
-    # 确保健康检查路由已注册（以防 @app.route 装饰器不生效）
-    healthz_exists = any(r.rule == "/healthz" for r in app.url_map.iter_rules())
-    if not healthz_exists:
-        print("⚠️ /healthz 路由未注册，手动添加...")
-        app.add_url_rule("/healthz", "healthz", lambda: ("OK", 200, {"Content-Type": "text/plain"}))
-    else:
-        print("✅ /healthz 路由已注册")
-
-    print(f"\n启动 Web 服务，端口: {PORT}")
+    print(f"启动 Web 服务，端口: {PORT}")
     app.run(host="0.0.0.0", port=PORT, debug=False)
