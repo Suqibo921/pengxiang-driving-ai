@@ -1,9 +1,9 @@
 {
   "build": {
-    "builder": "railpack"
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "python -m src.app",
     "restartPolicyType": "ON_FAILURE",
     "healthcheckPath": "/healthz"
   }
