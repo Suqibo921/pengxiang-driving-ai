@@ -1,0 +1,10 @@
+{
+  "build": {
+    "builder": "railpack"
+  },
+  "deploy": {
+    "startCommand": "python -m src.app",
+    "restartPolicyType": "ON_FAILURE",
+    "healthcheckPath": "/healthz"
+  }
+}
