@@ -1,6 +1,6 @@
 {
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "railpack"
   },
   "deploy": {
     "startCommand": "python test_app.py",
