@@ -174,9 +174,17 @@ if __name__ == "__main__":
     init_rag_system()
 
     # 打印所有已注册的路由，用于调试
-    print(f"\n已注册的路由:")
+    print(f"\n已注册的路由 ({len(list(app.url_map.iter_rules()))} 条):")
     for rule in app.url_map.iter_rules():
-        print(f"  {rule.rule} -> {rule.endpoint}")
+        print(f"  {rule.rule}")
+
+    # 确保健康检查路由已注册（以防 @app.route 装饰器不生效）
+    healthz_exists = any(r.rule == "/healthz" for r in app.url_map.iter_rules())
+    if not healthz_exists:
+        print("⚠️ /healthz 路由未注册，手动添加...")
+        app.add_url_rule("/healthz", "healthz", lambda: ("OK", 200, {"Content-Type": "text/plain"}))
+    else:
+        print("✅ /healthz 路由已注册")
 
     print(f"\n启动 Web 服务，端口: {PORT}")
     app.run(host="0.0.0.0", port=PORT, debug=False)
