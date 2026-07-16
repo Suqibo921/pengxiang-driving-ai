@@ -20,6 +20,24 @@ from config import (
 
 app = Flask(__name__)
 
+# ============================================
+# WSGI 中间件：拦截 /healthz 健康检查请求
+# 在 Flask 路由层之前处理，避免路由注册问题
+# ============================================
+
+class HealthCheckMiddleware:
+    """WSGI 中间件，在 Flask 处理请求之前拦截 /healthz。"""
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        if environ.get("PATH_INFO") == "/healthz":
+            start_response("200 OK", [("Content-Type", "text/plain")])
+            return [b"OK"]
+        return self.wsgi_app(environ, start_response)
+
+app.wsgi_app = HealthCheckMiddleware(app.wsgi_app)
+
 # 全局变量
 rag_engine = None
 vector_store = None
@@ -88,12 +106,6 @@ def init_rag_system():
 # ============================================
 # 路由
 # ============================================
-
-# 健康检查端点（在主模块中通过 add_url_rule 注册，确保 Railway 路由正常工作）
-def healthz():
-    """健康检查端点。"""
-    return "OK", 200, {"Content-Type": "text/plain"}
-
 
 @app.route("/")
 def index():
@@ -172,10 +184,5 @@ def rebuild():
 if __name__ == "__main__":
     # 先初始化，再启动 Web 服务
     init_rag_system()
-
-    # 手动注册健康检查路由（确保 Railway 健康检查正常工作）
-    app.add_url_rule("/healthz", "healthz", healthz, methods=["GET"])
-    print("✅ /healthz 路由已注册")
-
     print(f"启动 Web 服务，端口: {PORT}")
     app.run(host="0.0.0.0", port=PORT, debug=False)
