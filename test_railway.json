@@ -1,0 +1,10 @@
+{
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "python test_app.py",
+    "restartPolicyType": "ON_FAILURE",
+    "healthcheckPath": "/healthz"
+  }
+}
