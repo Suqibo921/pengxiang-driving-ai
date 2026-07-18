@@ -1,5 +1,4 @@
-[providers]
-python = true
+providers = ["...", "python"]
 
 [start]
 cmd = "python test_app.py"
