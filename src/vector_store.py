@@ -1,38 +1,31 @@
 """
 向量数据库管理模块
 ===================
-使用 ChromaDB 存储和检索文档向量。
-Embedding 使用 sklearn 的 TF-IDF（离线可用，无需下载模型）。
+使用 TF-IDF + 文件存储实现向量检索，纯 Python 依赖，离线可用。
 """
 
 import os
+import json
 import pickle
 import numpy as np
-from typing import List, Dict, Optional
-
-import chromadb
+from typing import List, Dict
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 class VectorStore:
-    """向量数据库管理器，封装 ChromaDB 的增删查操作。"""
+    """向量数据库管理器，基于 TF-IDF + 文件存储。"""
 
-    def __init__(self, persist_dir: str, model_name: str = "tfidf"):
-        """
-        初始化向量数据库。
-
-        参数:
-            persist_dir: 向量数据库持久化目录
-            model_name: 模型名称（保留参数，兼容性）
-        """
+    def __init__(self, persist_dir: str):
         self.persist_dir = persist_dir
         os.makedirs(persist_dir, exist_ok=True)
 
-        # 初始化 ChromaDB 客户端
-        self.client = chromadb.PersistentClient(path=persist_dir)
+        # 文件路径
+        self.vectorizer_path = os.path.join(persist_dir, "tfidf_vectorizer.pkl")
+        self.matrix_path = os.path.join(persist_dir, "tfidf_matrix.npy")
+        self.docs_path = os.path.join(persist_dir, "documents.json")
 
-        # 初始化 TF-IDF 向量化器（完全离线，无需下载）
-        # 使用字符级别的 n-gram，适合中文场景
+        # 初始化 TF-IDF 向量化器
         print("🧠 初始化 TF-IDF 向量化器（离线，中文 n-gram）")
         self.vectorizer = TfidfVectorizer(
             analyzer="char",
@@ -41,125 +34,85 @@ class VectorStore:
             sublinear_tf=True,
         )
         self._is_fitted = False
-        self._dimension = 5000
+        self._doc_matrix = None
+        self._documents = []
 
-        # 尝试加载已训练的向量化器
-        vectorizer_path = os.path.join(persist_dir, "tfidf_vectorizer.pkl")
-        if os.path.exists(vectorizer_path):
+        # 尝试加载已有数据
+        self._load()
+
+    def _load(self):
+        """加载已保存的向量数据。"""
+        if os.path.exists(self.vectorizer_path) and os.path.exists(self.matrix_path) and os.path.exists(self.docs_path):
             try:
-                with open(vectorizer_path, "rb") as f:
+                with open(self.vectorizer_path, "rb") as f:
                     self.vectorizer = pickle.load(f)
+                self._doc_matrix = np.load(self.matrix_path)
+                with open(self.docs_path, "r", encoding="utf-8") as f:
+                    self._documents = json.load(f)
                 self._is_fitted = True
-                self._dimension = len(self.vectorizer.get_feature_names_out())
-                print(f"✅ 加载已训练的向量化器，维度: {self._dimension}")
-            except Exception:
-                print("⚠️ 向量化器加载失败，将重新训练")
+                print(f"✅ 加载已有向量数据，共 {len(self._documents)} 个文档块")
+            except Exception as e:
+                print(f"⚠️ 加载失败，将重新构建: {e}")
 
-        # 获取或创建集合
-        self.collection = self.client.get_or_create_collection(
-            name="pengxiang_knowledge",
-            metadata={"hnsw:space": "cosine"}
-        )
-
-    def _fit_vectorizer(self, texts: List[str]):
-        """训练向量化器。"""
-        print("🔧 训练 TF-IDF 向量化器...")
-        self.vectorizer.fit(texts)
-        self._is_fitted = True
-        self._dimension = len(self.vectorizer.get_feature_names_out())
-        print(f"✅ 向量化器训练完成，维度: {self._dimension}")
-
-        # 保存向量化器
-        vectorizer_path = os.path.join(self.persist_dir, "tfidf_vectorizer.pkl")
-        with open(vectorizer_path, "wb") as f:
+    def _save(self):
+        """保存向量数据到文件。"""
+        with open(self.vectorizer_path, "wb") as f:
             pickle.dump(self.vectorizer, f)
-        print(f"💾 向量化器已保存至: {vectorizer_path}")
-
-    def get_embedding(self, text: str) -> List[float]:
-        """获取文本的向量表示。"""
-        if not self._is_fitted:
-            raise RuntimeError("向量化器尚未训练，请先添加文档")
-        vec = self.vectorizer.transform([text])
-        # L2 归一化
-        vec_norm = vec.toarray()[0]
-        norm = np.linalg.norm(vec_norm)
-        if norm > 0:
-            vec_norm = vec_norm / norm
-        return vec_norm.tolist()
+        np.save(self.matrix_path, self._doc_matrix)
+        with open(self.docs_path, "w", encoding="utf-8") as f:
+            json.dump(self._documents, f, ensure_ascii=False)
+        print(f"💾 已保存 {len(self._documents)} 个文档块")
 
     def add_documents(self, chunks: List[Dict[str, str]]):
-        """
-        将文档切片添加到向量数据库。
-
-        参数:
-            chunks: 文档切片列表，每项包含 text, source, chunk_id
-        """
+        """添加文档块到向量存储。"""
         if not chunks:
             print("⚠️ 没有文档需要添加")
             return
 
         texts = [c["text"] for c in chunks]
-        sources = [c["source"] for c in chunks]
-        ids = [f"{c['source']}_{c['chunk_id']}" for c in chunks]
 
-        # 训练向量化器
-        self._fit_vectorizer(texts)
+        # 训练并生成向量
+        print(f"🔧 训练 TF-IDF 向量化器，{len(texts)} 个文本...")
+        self._doc_matrix = self.vectorizer.fit_transform(texts)
+        self._is_fitted = True
+        self._documents = chunks
 
-        # 生成 embeddings
-        print(f"🔢 生成 {len(texts)} 个文本的向量...")
-        embeddings = []
-        for text in texts:
-            emb = self.get_embedding(text)
-            embeddings.append(emb)
-
-        # 添加到 ChromaDB
-        self.collection.add(
-            embeddings=embeddings,
-            documents=texts,
-            metadatas=[{"source": s} for s in sources],
-            ids=ids
-        )
-        print(f"✅ 已添加 {len(chunks)} 个文档块到向量数据库")
+        self._save()
+        print(f"✅ 已添加 {len(chunks)} 个文档块")
 
     def search(self, query: str, top_k: int = 5) -> List[Dict]:
-        """
-        搜索最相关的文档片段。
+        """搜索最相关的文档片段。"""
+        if not self._is_fitted or self._doc_matrix is None:
+            return []
 
-        参数:
-            query: 搜索查询
-            top_k: 返回结果数量
+        query_vec = self.vectorizer.transform([query])
+        similarities = cosine_similarity(query_vec, self._doc_matrix).flatten()
 
-        返回:
-            相关文档片段列表，每项包含 text, source, score
-        """
-        query_embedding = self.get_embedding(query)
+        top_k = min(top_k, len(self._documents))
+        top_indices = np.argsort(similarities)[::-1][:top_k]
 
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=min(top_k, self.collection.count())
-        )
-
-        documents = []
-        if results["documents"] and results["documents"][0]:
-            for i in range(len(results["documents"][0])):
-                documents.append({
-                    "text": results["documents"][0][i],
-                    "source": results["metadatas"][0][i]["source"] if results["metadatas"] else "",
-                    "score": results["distances"][0][i] if results["distances"] else 0
+        results = []
+        for idx in top_indices:
+            if similarities[idx] > 0:
+                doc = self._documents[idx]
+                results.append({
+                    "text": doc["text"],
+                    "source": doc.get("source", ""),
+                    "score": float(similarities[idx])
                 })
 
-        return documents
+        return results
 
     def count(self) -> int:
-        """返回向量数据库中的文档块数量。"""
-        return self.collection.count()
+        """返回文档块数量。"""
+        return len(self._documents)
 
     def clear(self):
-        """清空向量数据库。"""
-        self.client.delete_collection("pengxiang_knowledge")
-        self.collection = self.client.get_or_create_collection(
-            name="pengxiang_knowledge",
-            metadata={"hnsw:space": "cosine"}
-        )
+        """清空向量数据。"""
+        self._doc_matrix = None
+        self._documents = []
         self._is_fitted = False
+        for path in [self.vectorizer_path, self.matrix_path, self.docs_path]:
+            if os.path.exists(path):
+                os.remove(path)
         print("🗑️ 已清空向量数据库")

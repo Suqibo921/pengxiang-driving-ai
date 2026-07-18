@@ -2,17 +2,11 @@
 RAG 核心引擎
 =============
 负责将检索到的知识库内容与 LLM 回答结合。
-支持通义千问、DeepSeek、豆包 三模型切换。
+使用豆包（火山引擎）API。
 """
 
-import json
-from typing import List, Dict, Optional
-from http import HTTPStatus
-
-# 通义千问 SDK
-from dashscope import Generation as DashScopeGeneration
-
-# DeepSeek / 豆包 共用 OpenAI SDK
+import os
+from typing import List, Dict
 from openai import OpenAI
 
 
@@ -55,76 +49,28 @@ class RAGEngine:
     """RAG 核心引擎，连接检索和生成。"""
 
     def __init__(self, vector_store, config: dict):
-        """
-        初始化 RAG 引擎。
-
-        参数:
-            vector_store: VectorStore 实例
-            config: 包含 LLM 配置的字典
-        """
         self.vector_store = vector_store
         self.config = config
         self._init_llm()
 
     def _init_llm(self):
-        """根据配置初始化 LLM 客户端。"""
-        provider = self.config.get("llm_provider", "qwen")
-
-        if provider == "qwen":
-            api_key = self.config.get("dashscope_api_key", "")
-            if api_key and api_key != "YOUR_DASHSCOPE_API_KEY_HERE":
-                import dashscope
-                dashscope.api_key = api_key
-                self.llm_ready = True
-            else:
-                print("⚠️ 通义千问 API Key 未配置，将使用模拟模式")
-                self.llm_ready = False
-
-        elif provider == "deepseek":
-            api_key = self.config.get("deepseek_api_key", "")
-            if api_key and api_key != "YOUR_DEEPSEEK_API_KEY_HERE":
-                self.deepseek_client = OpenAI(
-                    api_key=api_key,
-                    base_url="https://api.deepseek.com/v1"
-                )
-                self.llm_ready = True
-            else:
-                print("⚠️ DeepSeek API Key 未配置，将使用模拟模式")
-                self.llm_ready = False
-
-        elif provider == "doubao":
-            api_key = self.config.get("doubao_api_key", "")
-            base_url = self.config.get("doubao_base_url", "https://ark.cn-beijing.volces.com/api/v3")
-            if api_key and api_key != "YOUR_DOUBAO_API_KEY_HERE":
-                self.doubao_client = OpenAI(
-                    api_key=api_key,
-                    base_url=base_url
-                )
-                self.llm_ready = True
-                print("✅ 豆包 API 客户端已初始化")
-            else:
-                print("⚠️ 豆包 API Key 未配置，将使用模拟模式")
-                self.llm_ready = False
+        """初始化豆包 LLM 客户端。"""
+        api_key = self.config.get("doubao_api_key", "")
+        base_url = self.config.get("doubao_base_url", "https://ark.cn-beijing.volces.com/api/v3")
+        if api_key and api_key != "YOUR_DOUBAO_API_KEY_HERE":
+            self.client = OpenAI(api_key=api_key, base_url=base_url)
+            self.llm_ready = True
+            print("✅ 豆包 API 客户端已初始化")
+        else:
+            print("⚠️ 豆包 API Key 未配置，将使用模拟模式")
+            self.llm_ready = False
 
     def _build_messages(self, question: str, context: str, history: str = "") -> List[Dict]:
-        """
-        构建消息列表（system + user 格式）。
-
-        参数:
-            question: 用户问题
-            context: 检索到的知识库上下文
-            history: 历史对话（预留）
-
-        返回:
-            消息列表，格式为 [{"role": "system", "content": ...}, {"role": "user", "content": ...}]
-        """
-        # 填充系统提示中的上下文
         if context.strip():
             system_content = SYSTEM_PROMPT.format(context=context)
         else:
             system_content = SYSTEM_PROMPT.format(context="（暂无相关知识库内容）")
 
-        # 如果有历史对话，加入用户消息中
         if history and history.strip():
             user_content = f"【历史对话】\n{history}\n\n【新问题】\n{question}"
         else:
@@ -135,37 +81,10 @@ class RAGEngine:
             {"role": "user", "content": user_content}
         ]
 
-    def _call_qwen(self, messages: List[Dict]) -> str:
-        """调用通义千问。"""
-        try:
-            response = DashScopeGeneration.call(
-                model=self.config.get("qwen_model_name", "qwen3-max"),
-                messages=messages,
-                result_format="message"
-            )
-            if response.status_code == HTTPStatus.OK:
-                return response.output.choices[0].message.content
-            else:
-                return f"❌ API 调用失败: {response.message}"
-        except Exception as e:
-            return f"❌ API 调用异常: {str(e)}"
-
-    def _call_deepseek(self, messages: List[Dict]) -> str:
-        """调用 DeepSeek。"""
-        try:
-            response = self.deepseek_client.chat.completions.create(
-                model=self.config.get("deepseek_model_name", "deepseek-chat"),
-                messages=messages,
-                stream=False
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            return f"❌ API 调用异常: {str(e)}"
-
     def _call_doubao(self, messages: List[Dict]) -> str:
         """调用豆包（火山引擎）。"""
         try:
-            response = self.doubao_client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.config.get("doubao_model_name", "doubao-1.5-pro-32k"),
                 messages=messages,
                 stream=False
@@ -185,11 +104,11 @@ class RAGEngine:
         if "价格" in question or "多少钱" in question or "费用" in question:
             lines = [l for l in context.split("\n") if "元" in l or "费" in l]
             if lines:
-                return f"根据我们驾校的信息：\n\n" + "\n".join(lines[:5]) + "\n\n具体详情欢迎来校咨询或拨打 13772409494 了解哦 😊"
+                return f"根据我们驾校的信息：\n\n" + "\n".join(lines[:5]) + "\n\n具体详情欢迎来校咨询或拨打 15609130011 了解哦 😊"
         elif "地址" in question or "在哪" in question or "位置" in question:
             return f"我们鹏翔驾校总部在西安市未央区石化大道与楼尤路东北角，另外还有南校区在长安区韦斗路西段。你可以坐班车过来，也可以预约上门接送～"
         elif "电话" in question or "联系" in question:
-            return f"我们的服务热线是 13772409494，QQ 是 846530883，也可以直接来校咨询哦～"
+            return f"我的电话是 15609130011，欢迎随时来电咨询哦～"
         elif "科目" in question or "考试" in question:
             exams = [l for l in context.split("\n") if "科目" in l or "考试" in l or "及格" in l]
             if exams:
@@ -201,19 +120,14 @@ class RAGEngine:
         """
         根据问题生成回答。
 
-        参数:
-            question: 用户的问题
-            history: 历史对话记录（用于第二阶段记忆功能）
-            top_k: 检索相关文档数量
-
         返回:
             {
                 "answer": "AI 的回答",
-                "sources": ["来源文件1", "来源文件2", ...],
+                "sources": ["来源文件1", ...],
                 "context": "检索到的知识库原文片段"
             }
         """
-        # 1. 检索相关知识
+        # 1. 检索
         retrieved = self.vector_store.search(question, top_k=top_k)
 
         # 2. 拼接上下文
@@ -228,19 +142,10 @@ class RAGEngine:
 
         context = "\n\n".join(context_parts)
 
-        # 3. 构建消息列表
+        # 3. 构建消息并调用 LLM
         messages = self._build_messages(question, context, history)
 
-        # 4. 调用 LLM
-        provider = self.config.get("llm_provider", "qwen")
-
-        if not self.llm_ready:
-            answer_text = self._simulate_answer(context, question)
-        elif provider == "qwen":
-            answer_text = self._call_qwen(messages)
-        elif provider == "deepseek":
-            answer_text = self._call_deepseek(messages)
-        elif provider == "doubao":
+        if self.llm_ready:
             answer_text = self._call_doubao(messages)
         else:
             answer_text = self._simulate_answer(context, question)
