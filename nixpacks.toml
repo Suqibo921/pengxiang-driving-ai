@@ -1,0 +1,5 @@
+[providers]
+python = true
+
+[start]
+cmd = "python test_app.py"
