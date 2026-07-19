@@ -74,11 +74,14 @@ def get_or_create_session(session_id):
     return conversation_states[session_id]
 
 def process_photo_tags(answer, session_state):
-    """处理回答中的 [图片:xxx] 标记。"""
+    """处理回答中的 [图片:xxx] 或 【图片:xxx】 标记。"""
     import re
+    # 匹配两种括号格式： [图片:xxx] 和 【图片:xxx】
+    photo_pattern = r'[\[【]图片:([^\]】]+)[\]】]'
+
     if session_state["photos_shown"]:
         # 已展示过，移除所有图片标记
-        answer = re.sub(r'\[图片:[^\]]+\]', '', answer).strip()
+        answer = re.sub(photo_pattern, '', answer).strip()
         return answer, False
 
     # 首次展示，替换图片标记为 HTML
@@ -89,7 +92,7 @@ def process_photo_tags(answer, session_state):
             return f'<img src="{url}" alt="驾校实景" style="max-width:100%;border-radius:8px;margin:8px 0;cursor:pointer;" onclick="window.open(\'{url}\')">'
         return ""
 
-    new_answer = re.sub(r'\[图片:([^\]]+)\]', replace_photo_tag, answer)
+    new_answer = re.sub(photo_pattern, replace_photo_tag, answer)
     showed = new_answer != answer
     if showed:
         session_state["photos_shown"] = True

@@ -6,6 +6,7 @@ RAG 核心引擎
 """
 
 import os
+import re
 from typing import List, Dict
 from openai import OpenAI
 
@@ -121,23 +122,90 @@ class RAGEngine:
         if not context.strip():
             return "这个我需要确认一下，稍后给您回复哦～"
 
-        question_lower = question.lower()
-        context_lower = context.lower()
-
+        # 判断是否询问价格
         if "价格" in question or "多少钱" in question or "费用" in question:
-            lines = [l for l in context.split("\n") if "元" in l or "费" in l]
-            if lines:
-                return f"根据我们驾校的信息：\n\n" + "\n".join(lines[:5]) + "\n\n具体详情欢迎来校咨询或拨打 15609130011 了解哦 😊"
-        elif "地址" in question or "在哪" in question or "位置" in question:
-            return f"我们鹏翔驾校总部在西安市未央区石化大道与楼尤路东北角，另外还有南校区在长安区韦斗路西段。你可以坐班车过来，也可以预约上门接送～"
-        elif "电话" in question or "联系" in question:
+            # 优先查找暑期优惠价信息
+            promo_lines = [l for l in context.split("\n") if "优惠" in l or "暑期" in l]
+            price_lines = [l for l in context.split("\n") if "元" in l or "费" in l]
+            total_lines = [l for l in context.split("\n") if "总费用" in l or "4054" in l or "3954" in l]
+
+            parts = []
+            if promo_lines:
+                parts.append("🔥 **暑期优惠价**")
+                parts.extend(promo_lines[:3])
+            if price_lines:
+                parts.extend(price_lines[:5])
+            if total_lines:
+                parts.extend(total_lines[:2])
+
+            content = "\n".join(parts) if parts else "\n".join(price_lines[:5])
+            return (
+                f"咱们鹏翔驾校现在暑期优惠，价格很划算哦！\n\n"
+                f"{content}\n\n"
+                f"我们是全城一费制，所有费用上墙公示，签订正规合同，后期没有任何隐形消费。"
+                f"科二科三补考费全部包含，还有考前模拟，挂科免费复训，您完全不用担心额外费用！\n\n"
+                f"要不您打我电话 15609130011，我详细给您介绍一下，合适的话还可以安排车免费接您来实地看看～"
+            )
+
+        # 判断是否询问照片/图片/环境
+        if any(kw in question for kw in ["照片", "图片", "看看", "环境", "场地", "训练场", "校区"]):
+            return (
+                "当然可以！给您看看我们鹏翔驾校的实景照片～\n\n"
+                "【图片:beiyuan_01】\n\n"
+                "这是我们**北校区（总部）**的训练场地，千亩级全封闭独立训练园区，"
+                "场地都是按考场1:1还原的，练车就是摸考场！\n\n"
+                "【图片:nanyuan_01】\n\n"
+                "这是**南校区**，位于长安区新韦斗路，环境优美，训练设施齐全，"
+                "423亩的大场地，单人单车随到随学，不用排队等车。\n\n"
+                "【图片:qinhan_01】\n\n"
+                "这是**秦汉考务中心**，我们的自有考场，考试好预约，通过率高！\n\n"
+                "照片看着不错吧？不过实地来看更震撼！您打我电话 15609130011，"
+                "我安排车免费接您来参观，合适再报名，完全没有压力～"
+            )
+
+        # 判断是否询问地址/位置
+        if "地址" in question or "在哪" in question or "位置" in question:
+            return (
+                "我们鹏翔驾校目前有 **四个校区**、**两个考场**：\n\n"
+                "1️⃣ **南校区**：长安区新韦斗路\n"
+                "2️⃣ **汉城湖公园校区**：汉城湖公园北门\n"
+                "3️⃣ **秦汉新城考务中心**\n"
+                "4️⃣ **沣西训练场地**\n\n"
+                "全城还有20+直营门店，覆盖西安主要区域，您到哪个店都行！\n\n"
+                "平时练车我们有免费大巴车接送，一天三趟，20条线路覆盖全西安市、"
+                "咸阳、秦汉、沣西，您在哪都方便～\n\n"
+                "要不您打我电话 15609130011，我给您安排最近的路线！"
+            )
+
+        if "电话" in question or "联系" in question:
             return f"我的电话是 15609130011，欢迎随时来电咨询哦～"
-        elif "科目" in question or "考试" in question:
+
+        if "科目" in question or "考试" in question:
             exams = [l for l in context.split("\n") if "科目" in l or "考试" in l or "及格" in l]
             if exams:
-                return f"关于考试这边给您说一下：\n\n" + "\n".join(exams[:6])
-        else:
-            return f"根据我们驾校的信息：\n\n{context[:500]}\n\n如果还有其他问题，随时问我哦 😊"
+                return f"关于考试这边给您说一下：\n\n" + "\n".join(exams[:8])
+
+        if "班车" in question or "接送" in question or "怎么去" in question:
+            return (
+                "咱们驾校有 **免费大巴车接送** 服务哦！\n\n"
+                "一天三趟班车，20条线路覆盖全西安市、咸阳、秦汉、沣西，"
+                "点对点上门接送，您不用自己奔波通勤。\n\n"
+                "您方便告诉我您在哪个区吗？我帮您看看附近有没有合适的站点～"
+            )
+
+        # 默认回答
+        # 截取最相关的上下文段落
+        lines = context.split("\n")
+        # 去重并保留有意义的行
+        meaningful = [l for l in lines if len(l.strip()) > 5 and not l.startswith("#")]
+        shown = meaningful[:8] if meaningful else lines[:10]
+        context_text = "\n".join(shown)
+
+        return (
+            f"根据我们驾校的信息：\n\n{context_text}\n\n"
+            f"如果您想了解更多详情，欢迎随时问我，或者直接打我电话 15609130011，"
+            f"我安排车免费接您来实地参观，合适再报名，完全没有压力哦～"
+        )
 
     def answer(self, question: str, history: str = "", top_k: int = 5) -> Dict:
         """
