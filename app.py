@@ -2,11 +2,13 @@
 鹏翔驾校 AI 助手 - Flask 主应用
 ================================
 提供 Web 聊天界面和 API 接口。
+支持照片展示、会话管理、图片一键渲染。
 """
 
 import os
 import sys
 import json
+import uuid
 import threading
 from flask import Flask, request, jsonify, render_template_string
 
@@ -27,6 +29,71 @@ app = Flask(__name__)
 # 全局状态
 rag_engine = None
 init_status = {"ready": False, "message": "正在初始化...", "doc_count": 0}
+
+# ============================================
+# 照片映射表
+# ============================================
+
+IMAGE_MAP = {
+    # 北校区
+    "beiyuan_01": "/static/images/beiyuan/beiyuan_01.jpg",
+    "beiyuan_02": "/static/images/beiyuan/beiyuan_02.jpg",
+    "beiyuan_03": "/static/images/beiyuan/beiyuan_03.jpg",
+    "beiyuan_04": "/static/images/beiyuan/beiyuan_04.jpg",
+    "beiyuan_05": "/static/images/beiyuan/beiyuan_05.jpg",
+    # 南校区
+    "nanyuan_01": "/static/images/nanyuan/nanyuan_01.jpg",
+    "nanyuan_02": "/static/images/nanyuan/nanyuan_02.jpg",
+    "nanyuan_03": "/static/images/nanyuan/nanyuan_03.jpg",
+    "nanyuan_04": "/static/images/nanyuan/nanyuan_04.jpg",
+    "nanyuan_05": "/static/images/nanyuan/nanyuan_05.jpg",
+    # 秦汉考务中心
+    "qinhan_01": "/static/images/qinhan/qinhan_01.jpg",
+    "qinhan_02": "/static/images/qinhan/qinhan_02.jpg",
+    "qinhan_03": "/static/images/qinhan/qinhan_03.jpg",
+}
+
+# 照片分组（用于首次展示时展示一组照片）
+IMAGE_GROUPS = {
+    "beiyuan": ["beiyuan_01", "beiyuan_02", "beiyuan_03"],
+    "nanyuan": ["nanyuan_01", "nanyuan_02", "nanyuan_03"],
+    "qinhan": ["qinhan_01", "qinhan_02", "qinhan_03"],
+}
+
+# 会话状态管理
+conversation_states = {}
+
+def get_or_create_session(session_id):
+    """获取或创建会话状态。"""
+    if session_id not in conversation_states:
+        conversation_states[session_id] = {
+            "photos_shown": False,
+            "turn_count": 0,
+            "history": []
+        }
+    return conversation_states[session_id]
+
+def process_photo_tags(answer, session_state):
+    """处理回答中的 [图片:xxx] 标记。"""
+    import re
+    if session_state["photos_shown"]:
+        # 已展示过，移除所有图片标记
+        answer = re.sub(r'\[图片:[^\]]+\]', '', answer).strip()
+        return answer, False
+
+    # 首次展示，替换图片标记为 HTML
+    def replace_photo_tag(match):
+        tag = match.group(1)
+        url = IMAGE_MAP.get(tag)
+        if url:
+            return f'<img src="{url}" alt="驾校实景" style="max-width:100%;border-radius:8px;margin:8px 0;cursor:pointer;" onclick="window.open(\'{url}\')">'
+        return ""
+
+    new_answer = re.sub(r'\[图片:([^\]]+)\]', replace_photo_tag, answer)
+    showed = new_answer != answer
+    if showed:
+        session_state["photos_shown"] = True
+    return new_answer, showed
 
 # ============================================
 # HTML 聊天界面
@@ -52,6 +119,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 .bubble { max-width: 85%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.6; word-break: break-word; }
 .message.user .bubble { background: #1a73e8; color: #fff; border-bottom-right-radius: 4px; }
 .message.assistant .bubble { background: #fff; color: #333; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.bubble img { max-width: 100%; border-radius: 8px; margin: 8px 0; cursor: pointer; }
 .typing { color: #999; font-style: italic; padding: 8px 16px; }
 .input-area { display: flex; gap: 10px; padding: 12px 0; background: #f5f7fa; }
 .input-area input { flex: 1; padding: 12px 16px; border: 1px solid #ddd; border-radius: 24px; font-size: 14px; outline: none; transition: border-color .2s; }
@@ -85,10 +153,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
   <div class="status-bar" id="statusBar">正在初始化...</div>
 </div>
 <script>
+// 会话 ID 管理
+function getSessionId() {
+    let sid = localStorage.getItem('pengxiang_session_id');
+    if (!sid) {
+        sid = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('pengxiang_session_id', sid);
+    }
+    return sid;
+}
+
 const messages = document.getElementById('messages');
 const question = document.getElementById('question');
 const sendBtn = document.getElementById('sendBtn');
 const statusBar = document.getElementById('statusBar');
+const sessionId = getSessionId();
 
 async function checkStatus() {
     try {
@@ -143,7 +222,7 @@ async function sendMessage() {
         const resp = await fetch('/api/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({question: q})
+            body: JSON.stringify({question: q, session_id: sessionId})
         });
         const data = await resp.json();
         hideTyping();
@@ -187,11 +266,33 @@ def chat():
     if not question:
         return jsonify({"error": "问题不能为空"}), 400
 
+    # 会话管理
+    session_id = data.get("session_id", "default")
+    session_state = get_or_create_session(session_id)
+    session_state["turn_count"] += 1
+    session_state["history"].append({"role": "user", "content": question})
+
     try:
-        result = rag_engine.answer(question)
+        # 构建历史上下文
+        history_text = ""
+        if len(session_state["history"]) > 1:
+            recent = session_state["history"][-5:]  # 最近5轮
+            for h in recent[:-1]:
+                prefix = "学员" if h["role"] == "user" else "小影"
+                history_text += f"{prefix}: {h['content']}\n"
+
+        result = rag_engine.answer(question, history=history_text)
+
+        # 处理照片标记
+        answer_text, showed = process_photo_tags(result["answer"], session_state)
+
+        # 记录历史
+        session_state["history"].append({"role": "assistant", "content": answer_text})
+
         return jsonify({
-            "answer": result["answer"],
-            "sources": result["sources"]
+            "answer": answer_text,
+            "sources": result["sources"],
+            "photos_shown": session_state["photos_shown"]
         })
     except Exception as e:
         return jsonify({"answer": f"抱歉，处理您的问题时出错了：{str(e)}"}), 500
