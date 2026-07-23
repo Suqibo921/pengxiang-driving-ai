@@ -355,5 +355,6 @@ init_thread.start()
 # ============================================
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    # 优先使用 Railway 环境变量 PORT，其次 config.py 的 PORT，默认 8080
+    port = int(os.environ.get("PORT", PORT if PORT else 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
