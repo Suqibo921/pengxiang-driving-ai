@@ -46,7 +46,7 @@ class VectorStore:
             try:
                 with open(self.vectorizer_path, "rb") as f:
                     self.vectorizer = pickle.load(f)
-                self._doc_matrix = np.load(self.matrix_path)
+                self._doc_matrix = np.load(self.matrix_path, allow_pickle=True)
                 with open(self.docs_path, "r", encoding="utf-8") as f:
                     self._documents = json.load(f)
                 self._is_fitted = True
@@ -58,7 +58,13 @@ class VectorStore:
         """保存向量数据到文件。"""
         with open(self.vectorizer_path, "wb") as f:
             pickle.dump(self.vectorizer, f)
-        np.save(self.matrix_path, self._doc_matrix)
+        # 如果是稀疏矩阵，转密集数组后保存（兼容 numpy 2.x）
+        try:
+            from scipy.sparse import issparse
+            matrix_to_save = self._doc_matrix.toarray() if issparse(self._doc_matrix) else self._doc_matrix
+        except ImportError:
+            matrix_to_save = self._doc_matrix
+        np.save(self.matrix_path, matrix_to_save)
         with open(self.docs_path, "w", encoding="utf-8") as f:
             json.dump(self._documents, f, ensure_ascii=False)
         print(f"💾 已保存 {len(self._documents)} 个文档块")
