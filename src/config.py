@@ -3,7 +3,7 @@
 ================================
 支持环境变量覆盖（云端部署），方便在 Railway/Zeabur 等平台设置。
 
-优先级：环境变量 > 硬编码默认值
+优先级：环境变量 > .env 文件 > 硬编码默认值
 
 === 环境变量列表 ===
 DOUBAO_API_KEY      - 豆包/火山引擎 API Key（必填）
@@ -14,10 +14,26 @@ PORT                - 服务端口（默认 5000）
 """
 
 import os
+import sys
+
+# ============================================
+# 0. 加载 .env 文件（本地开发用）
+# ============================================
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+dotenv_path = os.path.join(BASE_DIR, ".env")
+if os.path.exists(dotenv_path):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path)
+        print(f"✅ 已加载 .env 文件: {dotenv_path}")
+    except ImportError:
+        # dotenv 未安装时静默忽略
+        pass
 
 
 # ============================================
-# 1. LLM 配置 - 优先读环境变量，再读硬编码默认值
+# 1. LLM 配置 - 优先读环境变量，再读 .env，再读硬编码默认值
 # ============================================
 
 # 豆包/火山引擎 API Key（云端部署时在平台设置环境变量）
@@ -54,9 +70,6 @@ DOUBAO_BASE_URL = os.environ.get("DOUBAO_BASE_URL", "https://ark.cn-beijing.volc
 # ============================================
 # 3. 知识库配置
 # ============================================
-
-# 项目根目录
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 KNOWLEDGE_BASE_DIR = os.path.join(BASE_DIR, "knowledge_base")
 VECTOR_DB_DIR = os.path.join(BASE_DIR, "vector_db")
