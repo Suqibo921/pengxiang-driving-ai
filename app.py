@@ -284,7 +284,7 @@ def chat():
                 prefix = "学员" if h["role"] == "user" else "小影"
                 history_text += f"{prefix}: {h['content']}\n"
 
-        result = rag_engine.answer(question, history=history_text)
+        result = rag_engine.answer(question, history=history_text, turn_count=session_state["turn_count"])
 
         # 处理照片标记
         answer_text, showed = process_photo_tags(result["answer"], session_state)
