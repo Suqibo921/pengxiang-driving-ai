@@ -30,16 +30,17 @@ SYSTEM_PROMPT = """你是西安鹏翔驾校的招生顾问"小影"，热情专�
 - **前2轮对话：绝对不要主动提供电话**
 - 第3轮起，仅在以下情况可以在回答末尾自然提供电话 15609130011：
   * 顾客主动问联系方式
-  * 顾客说"想报名"、"想参观"、"想看看"
+  * 顾客说"想报名"、"想参观"、"想实地看看"
   * 顾客表示犹豫不决，你说"要不打我电话..."
 - 电话必须放在回答的**最后一句**，不能放在开头或中间
 - **所有事情找小影本人就行**，不要给其他电话或联系方式
-- 如果顾客只是问价格、问班车、问流程，**不要推电话**，直接回答即可
+- 如果顾客只是问价格、问班车路线、问考试流程、问报名材料，**不要推电话**，直接回答即可
 
 ## 照片展示规则（重要）
-- 当顾客问"你们驾校环境怎么样？""有照片吗？""训练场什么样子？"时，**必须在回答中插入照片标记**，格式为【图片:beiyuan_01】、【图片:nanyuan_01】、【图片:qinhan_01】
-- 照片标记只在一个会话中嵌入一次，一次最多嵌入3张照片
-- 回答价格、考试流程、报名、班车等问题时**不要**嵌入照片标记
+- 只有在顾客明确问"环境怎么样？""有照片吗？""训练场什么样子？""看看校区"时，才在回答中嵌入照片标记
+- 照片标记格式：【图片:beiyuan_01】、【图片:nanyuan_01】、【图片:qinhan_01】
+- 一次最多嵌入3张照片，且只在整个会话中展示一次
+- **顾客问价格、班车、考试、报名、流程时，绝对不要嵌入照片标记**
 
 ## 班车路线推荐流程（重要）
 当顾客询问班车时：
@@ -60,10 +61,32 @@ SYSTEM_PROMPT = """你是西安鹏翔驾校的招生顾问"小影"，热情专�
   * 问完考试后反问："您担心哪一科？我给您详细说说"
   * 问完价格后反问："您打算什么时候报名呀？最近暑期优惠活动很划算哦～"
   * 聊完训练场后反问："您要不要抽空来实地看看？我给您安排～"
-- **不要每轮都说"还有什么想了解的吗？"**，太生硬了，换成自然的反问
+- **绝对不要每轮都说"还有什么想了解的吗？"**，太生硬了，换成自然的反问
 - 价格要准确说出数字，但要口语化，比如"C1暑期优惠价3490元，全部下来4054元"
 - 班车要说出具体线路名、站点名和发车时间，不要模糊回答
 - 真诚解答最重要，不要每段话都推销
+
+## 常见地名→区域对照表（用于班车推荐）
+- 土门→莲湖区（南校3号线7:00发车、总部3号线）
+- 钟楼→莲湖区/碑林区（需确认、总部4号线7:40发车）
+- 小寨→雁塔区（总部6号线7:30发车、总部1号线）
+- 龙首村→未央区（总部2号线8:05发车）
+- 电子城→雁塔区（总部1号线7:20发车、总部6号线）
+- 郭杜→长安区（南校4号线7:30发车）
+- 韦曲南→长安区（南校5号线7:40发车）
+- 辛家庙→灞桥区（总部7号线7:20发车）
+- 长乐坡→新城区（总部5号线7:20发车）
+- 凤城五路→未央区（总部2号线8:20发车）
+- 电视塔→雁塔区（总部6号线7:20发车）
+- 行政中心→未央区（总部1号线8:02发车）
+- 大明宫→未央区/新城区（需确认）
+- 火车站→新城区（总部2号线7:56发车）
+- 三桥→西咸新区/未央区（需确认）
+- 咸阳→咸阳市区（秦汉3号线7:00发车）
+- 航天城→长安区（南校5号线7:30发车）
+- 大学城→长安区（南校3号线7:00发车）
+- 鱼化寨→雁塔区（总部3号线7:05发车）
+- 高新路→高新区（总部3号线7:36发车）
 
 ## 知识库内容
 {context}"""
@@ -126,14 +149,14 @@ class RAGEngine:
         if not context.strip():
             return "这个我需要确认一下，稍后给您回复哦～"
 
-        # 是否应该推电话：顾客明确表达兴趣时才推
+        # 是否应该推电话：仅当顾客明确表达报名意向时
+        # 注意：问价格、班车路线、考试、流程等**不推电话**
         should_offer_phone = (
             turn_count >= 2 and (
-                "价格" in question or "多少钱" in question or "费用" in question or
-                "报名" in question or "怎么去" in question or
-                ("看" in question and ("场地" in question or "环境" in question or "校区" in question)) or
+                ("报名" in question and ("想" in question or "要" in question or "怎么" in question)) or
+                ("想" in question and ("报" in question or "学" in question or "了解" in question)) or
                 "犹豫" in question or "不确定" in question or "考虑" in question or
-                "想了解" in question or "想报" in question or "想学" in question
+                "电话" in question or "联系" in question or "联系方式" in question
             )
         )
 
@@ -215,7 +238,16 @@ class RAGEngine:
             return answer
 
         # ===== 照片/环境查询 =====
-        if any(kw in question for kw in ["照片", "图片", "看看", "环境", "场地", "训练场", "校区"]):
+        # 注意：严格限定关键词，避免"看看价格"、"看看班车"误触发
+        PHOTO_KEYWORDS = ["照片", "图片", "环境", "场地", "训练场", "校区"]
+        is_photo_query = any(kw in question for kw in PHOTO_KEYWORDS)
+        # "看看"只有在没有其他非照片关键词时才触发
+        if not is_photo_query and "看看" in question:
+            # 排除价格、班车、报名等非照片场景
+            non_photo_kw = ["价格", "多少钱", "费用", "班车", "接送", "怎么去", "考试", "报名", "流程", "科目", "学时"]
+            if not any(kw in question for kw in non_photo_kw):
+                is_photo_query = True
+        if is_photo_query:
             # 从context中提取校区描述
             campus_lines = []
             for line in text_lines:
@@ -377,10 +409,14 @@ class RAGEngine:
             for s in shown[:10]:
                 result += f"• {s}\n"
 
-            # 首次介绍附照片
+            # 首次介绍附照片（3张，展示北校、南校、秦汉）
             if turn_count <= 1:
                 result += "\n【图片:beiyuan_01】\n"
-                result += "这是我们北校区（总部）的训练场地～\n"
+                result += "这是我们北校区（总部），千亩级全封闭训练园区～\n\n"
+                result += "【图片:nanyuan_01】\n"
+                result += "这是我们南校区，位于长安区，423亩大场地～\n\n"
+                result += "【图片:qinhan_01】\n"
+                result += "这是我们秦汉考务中心，自有考场，考试好预约～\n"
 
             result += "\n如果您想了解具体的价格、班型或者考试流程，随时问我哦～"
             return result
@@ -390,12 +426,14 @@ class RAGEngine:
         shown = meaningful[:8] if len(meaningful) >= 8 else text_lines[:10]
         context_text = "\n".join(shown)
 
-        answer = f"根据我们驾校的信息：\n\n{context_text}"
+        # 自然的口语化回答，不要"根据我们驾校的信息"
+        answer = f"这个我来给您说说～\n\n{context_text}"
 
         if should_offer_phone:
-            answer += f"\n\n如果您想了解更多详情，欢迎随时问我，或者直接打我电话15609130011，我安排车免费接您来实地参观～"
+            answer += f"\n\n要是您想进一步了解，打我电话15609130011，我安排车免费接您来实地看看，合适再报名，完全没压力～"
         else:
-            answer += "\n\n还有什么想了解的，随时问我哦～"
+            # 自然反问，不用"还有什么想了解的"
+            answer += "\n\n对了，您是想学手动挡C1还是自动挡C2呀？我可以给您详细说说价格和课程～"
 
         return answer
 
@@ -440,8 +478,20 @@ class RAGEngine:
             answer_text = self._simulate_answer(context, question, turn_count=turn_count)
 
         # 4. 自动注入图片标记（确保 LLM 模式下也能显示图片）
-        # 当用户问环境/照片/训练场时，如果 LLM 回复中没有图片标记，自动补上
-        is_photo_question = any(kw in question for kw in ["照片", "图片", "环境", "场地", "训练场", "校区", "看看"])
+        # 严格判断：只有当用户明确问环境/照片时，才注入图片
+        # 排除"看看价格"、"看看班车"、"看看考试"等非照片场景
+        PHOTO_KEYWORDS = ["照片", "图片", "环境", "训练场"]
+        is_photo_question = any(kw in question for kw in PHOTO_KEYWORDS)
+        # "看看"和"场地"需要排除非照片场景
+        if not is_photo_question:
+            non_photo_kw = ["价格", "多少钱", "费用", "班车", "接送", "怎么去", "考试", "报名", "流程", "科目", "学时"]
+            if "看看" in question and not any(kw in question for kw in non_photo_kw):
+                is_photo_question = True
+            if "场地" in question and not any(kw in question for kw in non_photo_kw):
+                is_photo_question = True
+            if "校区" in question and not any(kw in question for kw in non_photo_kw):
+                is_photo_question = True
+
         PHOTO_TAGS = "【图片:beiyuan_01】\n\n这是我们北校区（总部），位于未央区石化大道，千亩级全封闭独立训练园区。\n\n【图片:nanyuan_01】\n\n这是我们南校区，位于长安区新韦斗路，423亩大场地，单人单车随到随学。\n\n【图片:qinhan_01】\n\n这是秦汉考务中心，我们的自有考场，考试好预约，通过率高！"
 
         if is_photo_question and "【图片:" not in answer_text:
